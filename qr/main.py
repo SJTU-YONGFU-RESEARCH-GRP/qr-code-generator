@@ -23,9 +23,11 @@ def main() -> NoReturn:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python -m src.main "https://example.com" -o qr_code.png
-  python -m src.main "Hello World" --version 5 --error-correction H --box-size 15
-  python -m src.main "Text data" -f JPEG --fill-color blue --back-color white
+  python -m qr.main "https://example.com" -o qr_code.png
+  python -m qr.main "Hello World" --version 5 --error-correction H --box-size 15
+  python -m qr.main "Text data" -f JPEG --fill-color blue --back-color white
+  python -m qr.main --image-to-csv qr_code.png --csv-output qr_matrix.csv
+  python -m qr.main --csv-to-image qr_matrix.csv --output qr_from_matrix.png --box-size 5
         """,
     )
 
@@ -141,6 +143,19 @@ Examples:
         help="Output directory for regenerated QR codes (default: regenerated).",
     )
 
+    # Binary matrix conversion functionality
+    parser.add_argument(
+        "--image-to-csv",
+        type=str,
+        help="Convert QR code image to CSV binary matrix format (requires --csv-output).",
+    )
+
+    parser.add_argument(
+        "--csv-to-image",
+        type=str,
+        help="Convert CSV binary matrix to QR code image (requires --output).",
+    )
+
     args = parser.parse_args()
 
     # Setup logging
@@ -247,6 +262,43 @@ Examples:
             sys.exit(1)
         except Exception as e:
             logging.error(f"Unexpected error during image regeneration: {e}")
+            sys.exit(1)
+
+    elif args.image_to_csv:
+        # Convert QR code image to CSV matrix
+        try:
+            if not args.csv_output:
+                parser.error("--csv-output is required when using --image-to-csv")
+
+            logging.info(f"Converting QR code image {args.image_to_csv} to CSV matrix")
+            QRCodeGenerator.image_to_csv_matrix(args.image_to_csv, args.csv_output)
+            print(f"QR code image converted to CSV matrix successfully: {args.csv_output}")
+
+        except ValueError as e:
+            logging.error(f"Image to CSV conversion error: {e}")
+            sys.exit(1)
+        except Exception as e:
+            logging.error(f"Unexpected error during image to CSV conversion: {e}")
+            sys.exit(1)
+
+    elif args.csv_to_image:
+        # Convert CSV matrix to QR code image
+        try:
+            if not args.output:
+                parser.error("--output is required when using --csv-to-image")
+
+            # Extract box_size from args if provided
+            box_size = getattr(args, 'box_size', 1) if hasattr(args, 'box_size') else 1
+
+            logging.info(f"Converting CSV matrix {args.csv_to_image} to QR code image")
+            QRCodeGenerator.csv_matrix_to_image(args.csv_to_image, args.output, box_size)
+            print(f"CSV matrix converted to QR code image successfully: {args.output}")
+
+        except ValueError as e:
+            logging.error(f"CSV to image conversion error: {e}")
+            sys.exit(1)
+        except Exception as e:
+            logging.error(f"Unexpected error during CSV to image conversion: {e}")
             sys.exit(1)
 
     else:

@@ -160,3 +160,163 @@ class TestQRCodeGenerator:
             # Test decoding - this should work with our improved preprocessing
             decoded = QRCodeGenerator.decode_qr_code(test_file)
             assert decoded == "A" * 400
+
+    def test_image_to_csv_matrix_basic(self) -> None:
+        """Test converting QR code image to CSV matrix."""
+        # Generate a simple QR code
+        generator = QRCodeGenerator(data="CSV Test Data")
+        qr = generator.generate_qr_code()
+
+        # Save to a temporary file
+        with tempfile.TemporaryDirectory() as temp_dir:
+            image_path = Path(temp_dir) / "test_qr.png"
+            csv_path = Path(temp_dir) / "test_matrix.csv"
+
+            img = qr.make_image(fill_color="black", back_color="white")
+            img.save(image_path)
+
+            # Test conversion to CSV
+            QRCodeGenerator.image_to_csv_matrix(image_path, csv_path)
+
+            # Verify CSV file was created and contains data
+            assert csv_path.exists()
+
+            # Read and verify CSV content
+            import csv
+            with open(csv_path, 'r', newline='', encoding='utf-8') as csvfile:
+                reader = csv.reader(csvfile)
+                rows = list(reader)
+
+            assert len(rows) > 0  # Should have at least one row
+            assert len(rows[0]) > 0  # Should have at least one column
+            assert all(cell in ['0', '1'] for row in rows for cell in row)  # Only 0s and 1s
+
+    def test_csv_matrix_to_image_basic(self) -> None:
+        """Test converting CSV matrix to QR code image."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            csv_path = Path(temp_dir) / "test_matrix.csv"
+            image_path = Path(temp_dir) / "test_qr_from_csv.png"
+
+            # Create a simple test matrix (5x5 QR-like pattern)
+            test_matrix = [
+                [1, 1, 1, 1, 1],
+                [1, 0, 0, 0, 1],
+                [1, 0, 1, 0, 1],
+                [1, 0, 0, 0, 1],
+                [1, 1, 1, 1, 1],
+            ]
+
+            # Write test matrix to CSV
+            import csv
+            with open(csv_path, 'w', newline='', encoding='utf-8') as csvfile:
+                writer = csv.writer(csvfile)
+                writer.writerows(test_matrix)
+
+            # Test conversion from CSV to image
+            QRCodeGenerator.csv_matrix_to_image(csv_path, image_path, box_size=10)
+
+            # Verify image was created
+            assert image_path.exists()
+
+            # Verify image has expected dimensions
+            from PIL import Image
+            img = Image.open(image_path)
+            assert img.size == (50, 50)  # 5x5 matrix * 10 box_size
+            img.close()
+
+    def test_csv_matrix_to_image_non_square(self) -> None:
+        """Test converting non-square CSV matrix to QR code image."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            csv_path = Path(temp_dir) / "test_matrix.csv"
+            image_path = Path(temp_dir) / "test_qr_from_csv.png"
+
+            # Create a non-square test matrix (3x4)
+            test_matrix = [
+                [1, 1, 1, 1],
+                [1, 0, 0, 1],
+                [1, 1, 1, 1],
+            ]
+
+            # Write test matrix to CSV
+            import csv
+            with open(csv_path, 'w', newline='', encoding='utf-8') as csvfile:
+                writer = csv.writer(csvfile)
+                writer.writerows(test_matrix)
+
+            # Test conversion - should use largest dimension (4x4)
+            QRCodeGenerator.csv_matrix_to_image(csv_path, image_path, box_size=5)
+
+            # Verify image was created
+            assert image_path.exists()
+
+            # Verify image has expected dimensions (4x4 * 5 box_size)
+            from PIL import Image
+            img = Image.open(image_path)
+            assert img.size == (20, 20)
+            img.close()
+
+    def test_csv_matrix_to_image_empty_file(self) -> None:
+        """Test converting empty CSV file to image."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            csv_path = Path(temp_dir) / "empty_matrix.csv"
+            image_path = Path(temp_dir) / "test_qr_from_csv.png"
+
+            # Create empty CSV file
+            csv_path.touch()
+
+            # Test conversion - should raise error
+            with pytest.raises(ValueError, match="CSV file is empty"):
+                QRCodeGenerator.csv_matrix_to_image(csv_path, image_path)
+
+    def test_csv_matrix_to_image_invalid_data(self) -> None:
+        """Test converting CSV with invalid data to image."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            csv_path = Path(temp_dir) / "invalid_matrix.csv"
+            image_path = Path(temp_dir) / "test_qr_from_csv.png"
+
+            # Create CSV with invalid data
+            import csv
+            with open(csv_path, 'w', newline='', encoding='utf-8') as csvfile:
+                writer = csv.writer(csvfile)
+                writer.writerow(["1", "invalid", "0"])
+                writer.writerow(["0", "1", "2"])
+
+            # Test conversion - should raise error
+            with pytest.raises(ValueError):
+                QRCodeGenerator.csv_matrix_to_image(csv_path, image_path)
+
+    def test_roundtrip_conversion(self) -> None:
+        """Test roundtrip conversion: image -> CSV -> image."""
+        # Generate original QR code
+        original_generator = QRCodeGenerator(data="Roundtrip Test Data", version=2)
+        original_qr = original_generator.generate_qr_code()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_dir = Path(temp_dir)
+
+            # Save original image
+            original_image = temp_dir / "original.png"
+            img = original_qr.make_image(fill_color="black", back_color="white")
+            img.save(original_image)
+
+            # Convert to CSV
+            csv_matrix = temp_dir / "matrix.csv"
+            QRCodeGenerator.image_to_csv_matrix(original_image, csv_matrix)
+
+            # Convert back to image
+            reconstructed_image = temp_dir / "reconstructed.png"
+            QRCodeGenerator.csv_matrix_to_image(csv_matrix, reconstructed_image, box_size=1)
+
+            # Verify both files exist
+            assert original_image.exists()
+            assert csv_matrix.exists()
+            assert reconstructed_image.exists()
+
+            # Verify CSV contains valid binary data
+            import csv
+            with open(csv_matrix, 'r', newline='', encoding='utf-8') as csvfile:
+                reader = csv.reader(csvfile)
+                rows = list(reader)
+
+            assert len(rows) > 0
+            assert all(cell in ['0', '1'] for row in rows for cell in row)

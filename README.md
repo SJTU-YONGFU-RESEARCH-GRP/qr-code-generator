@@ -137,6 +137,8 @@ python -m qr.main [OPTIONS] DATA
 | `--from-image` | - | Path to QR image to decode and regenerate | - |
 | `--regenerate-dir` | - | Directory of QR images to regenerate | - |
 | `--regenerate-output` | - | Output directory for regenerated QR codes | regenerated |
+| `--image-to-csv` | - | Convert QR image to CSV binary matrix | - |
+| `--csv-to-image` | - | Convert CSV binary matrix to QR image | - |
 
 #### Examples
 
@@ -179,6 +181,16 @@ python -m qr.main [OPTIONS] DATA
    ```bash
    python -m qr.main --regenerate-dir qr_images --regenerate-output regenerated --box-size 20
    ```
+
+9. **Convert QR image to CSV binary matrix:**
+   ```bash
+   python -m qr.main --image-to-csv qr_code.png --csv-output qr_matrix.csv
+   ```
+
+10. **Convert CSV binary matrix to QR image:**
+    ```bash
+    python -m qr.main --csv-to-image qr_matrix.csv --output qr_from_matrix.png --box-size 5
+    ```
 
 ### Using as a Library
 
@@ -282,6 +294,33 @@ successful = QRCodeGenerator.regenerate_from_images(
 print(f"Regenerated {successful} QR codes")
 ```
 
+#### Converting QR Images to CSV Binary Matrices
+
+```python
+from qr.core.qr_generator import QRCodeGenerator
+
+# Convert QR code image to CSV binary matrix
+QRCodeGenerator.image_to_csv_matrix(
+    image_path="qr_code.png",
+    csv_path="qr_matrix.csv"
+)
+print("QR code image converted to CSV matrix")
+```
+
+#### Converting CSV Binary Matrices to QR Images
+
+```python
+from qr.core.qr_generator import QRCodeGenerator
+
+# Convert CSV binary matrix to QR code image
+QRCodeGenerator.csv_matrix_to_image(
+    csv_path="qr_matrix.csv",
+    image_path="qr_from_matrix.png",
+    box_size=5  # Size of each module in pixels
+)
+print("CSV matrix converted to QR code image")
+```
+
 ## CSV File Format
 
 ### Input CSV Format
@@ -327,6 +366,26 @@ When using `--csv-output`, the following metadata is saved:
 | `file_size_bytes` | File size in bytes |
 | `created_timestamp` | File creation time |
 | `modified_timestamp` | File modification time |
+
+### Binary Matrix CSV Format
+
+When converting QR code images to CSV binary matrices, the tool generates a CSV file where:
+- Each row represents one row of QR code modules
+- Each column represents one column of QR code modules
+- Values are either `1` (black/dark module) or `0` (white/light module)
+- The matrix is square (N x N dimensions where N is the QR code version size)
+
+**Example Binary Matrix CSV:**
+```csv
+1,1,1,1,1,1,1,0,1,0,1,1,1,0,1,0,0,0,1,1,0
+1,0,0,0,0,0,1,0,0,1,0,0,0,1,0,1,1,0,0,0,0
+1,0,1,1,1,0,1,0,1,0,1,1,0,0,1,0,0,1,0,1,0
+1,0,1,1,1,0,1,0,0,1,0,1,1,0,0,0,1,0,1,0,0
+1,0,1,1,1,0,1,0,1,1,1,0,0,1,1,1,0,1,0,1,0
+...
+```
+
+This format is ideal for AI modeling, computer vision analysis, or any application that needs to work directly with the QR code's binary pattern data.
 
 ## Project Structure
 

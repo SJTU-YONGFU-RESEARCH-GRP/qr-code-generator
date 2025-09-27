@@ -210,6 +210,161 @@ done
 # Binary-like data
 run_test "Binary Data" "$($PYTHON_CMD -c "import os; print(os.urandom(50).hex())")" 10 "H" 10 4 "black" "white" "PNG"
 
+# CSV Binary Matrix Conversion Tests
+run_csv_conversion_test() {
+    local test_name="$1"
+    local data="$2"
+    local version="$3"
+    local error_correction="$4"
+    local box_size="$5"
+    local border="$6"
+    local fill_color="$7"
+    local back_color="$8"
+    local image_format="$9"
+
+    TOTAL_TESTS=$((TOTAL_TESTS + 1))
+    log "INFO" "Starting CSV conversion test $TOTAL_TESTS: $test_name"
+    log "DEBUG" "Test parameters: data='${data:0:50}...', version=$version, error_correction=$error_correction, box_size=$box_size, border=$border, fill_color=$fill_color, back_color=$back_color, format=$image_format"
+
+    # Generate QR code
+    local qr_file="$TEST_OUTPUT_DIR/qr_test_$(date +%s)_$TOTAL_TESTS.png"
+    local csv_file="$TEST_OUTPUT_DIR/qr_matrix_$(date +%s)_$TOTAL_TESTS.csv"
+    local reconstructed_file="$TEST_OUTPUT_DIR/qr_reconstructed_$(date +%s)_$TOTAL_TESTS.png"
+
+    log "DEBUG" "Generating QR code to $qr_file"
+    start_time=$(date +%s.%N)
+
+    # Use printf to safely escape the data and avoid eval issues with special characters
+    printf -v safe_data '%q' "$data"
+
+    local cmd="$QR_GENERATOR_CMD $safe_data -o \"$qr_file\" \
+        --version \"$version\" \
+        --error-correction \"$error_correction\" \
+        --box-size \"$box_size\" \
+        --border \"$border\" \
+        --fill-color \"$fill_color\" \
+        --back-color \"$back_color\" \
+        --image-format \"$image_format\""
+
+    eval "$cmd > /dev/null 2>&1"
+    gen_exit_code=$?
+    end_time=$(date +%s.%N)
+    gen_duration=$(echo "$end_time - $start_time" | bc)
+
+    if [ $gen_exit_code -ne 0 ]; then
+        log "ERROR" "QR code generation failed for $test_name (exit code: $gen_exit_code)"
+        FAILED_TESTS=$((FAILED_TESTS + 1))
+        return 1
+    fi
+    log "DEBUG" "QR code generated successfully in ${gen_duration}s"
+
+    # Convert QR code to CSV matrix
+    log "DEBUG" "Converting QR code to CSV matrix: $csv_file"
+    start_time=$(date +%s.%N)
+
+    local csv_cmd="$QR_GENERATOR_CMD --image-to-csv \"$qr_file\" --csv-output \"$csv_file\""
+    eval "$csv_cmd > /dev/null 2>&1"
+    csv_exit_code=$?
+    end_time=$(date +%s.%N)
+    csv_duration=$(echo "$end_time - $start_time" | bc)
+
+    if [ $csv_exit_code -ne 0 ]; then
+        log "ERROR" "Image to CSV conversion failed for $test_name (exit code: $csv_exit_code)"
+        FAILED_TESTS=$((FAILED_TESTS + 1))
+        rm -f "$qr_file" "$csv_file" "$reconstructed_file"
+        return 1
+    fi
+    log "DEBUG" "Image to CSV conversion completed in ${csv_duration}s"
+
+    # Verify CSV file was created and contains valid data
+    if [ ! -f "$csv_file" ]; then
+        log "ERROR" "CSV file was not created for $test_name"
+        FAILED_TESTS=$((FAILED_TESTS + 1))
+        rm -f "$qr_file" "$csv_file" "$reconstructed_file"
+        return 1
+    fi
+
+    # Check CSV content (should contain only 0s and 1s)
+    if ! $PYTHON_CMD -c "
+import csv
+with open('$csv_file', 'r', newline='', encoding='utf-8') as f:
+    reader = csv.reader(f)
+    for row in reader:
+        if any(cell not in ['0', '1'] for cell in row):
+            print('ERROR: Invalid CSV content')
+            exit(1)
+print('CSV content is valid')
+"; then
+        log "ERROR" "CSV file contains invalid content for $test_name"
+        FAILED_TESTS=$((FAILED_TESTS + 1))
+        rm -f "$qr_file" "$csv_file" "$reconstructed_file"
+        return 1
+    fi
+
+    # Convert CSV matrix back to QR code image
+    log "DEBUG" "Converting CSV matrix back to QR code: $reconstructed_file"
+    start_time=$(date +%s.%N)
+
+    local reconstruct_cmd="$QR_GENERATOR_CMD --csv-to-image \"$csv_file\" --output \"$reconstructed_file\" --box-size 1"
+    eval "$reconstruct_cmd > /dev/null 2>&1"
+    reconstruct_exit_code=$?
+    end_time=$(date +%s.%N)
+    reconstruct_duration=$(echo "$end_time - $start_time" | bc)
+
+    if [ $reconstruct_exit_code -ne 0 ]; then
+        log "ERROR" "CSV to image conversion failed for $test_name (exit code: $reconstruct_exit_code)"
+        FAILED_TESTS=$((FAILED_TESTS + 1))
+        rm -f "$qr_file" "$csv_file" "$reconstructed_file"
+        return 1
+    fi
+    log "DEBUG" "CSV to image conversion completed in ${reconstruct_duration}s"
+
+    # Verify reconstructed image was created
+    if [ ! -f "$reconstructed_file" ]; then
+        log "ERROR" "Reconstructed image was not created for $test_name"
+        FAILED_TESTS=$((FAILED_TESTS + 1))
+        rm -f "$qr_file" "$csv_file" "$reconstructed_file"
+        return 1
+    fi
+
+    # Decode the reconstructed QR code to verify it matches original data
+    log "DEBUG" "Decoding reconstructed QR code"
+    start_time=$(date +%s.%N)
+    decoded_data=$(decode_qr "$reconstructed_file")
+    end_time=$(date +%s.%N)
+    decode_duration=$(echo "$end_time - $start_time" | bc)
+    log "DEBUG" "Decoding completed in ${decode_duration}s"
+
+    if [[ "$decoded_data" == "ERROR:"* ]]; then
+        log "ERROR" "Reconstructed QR code decoding failed for $test_name: $decoded_data"
+        FAILED_TESTS=$((FAILED_TESTS + 1))
+        rm -f "$qr_file" "$csv_file" "$reconstructed_file"
+        return 1
+    fi
+
+    # Verify the decoded data matches the original
+    if [ "$decoded_data" = "$data" ]; then
+        log "INFO" "PASSED: CSV conversion test $test_name (decoded: '${decoded_data:0:50}...')"
+        PASSED_TESTS=$((PASSED_TESTS + 1))
+    else
+        log "ERROR" "FAILED: CSV conversion test $test_name - Mismatch detected"
+        log "ERROR" "Expected: '${data:0:50}...'"
+        log "ERROR" "Got: '${decoded_data:0:50}...'"
+        FAILED_TESTS=$((FAILED_TESTS + 1))
+    fi
+
+    # Clean up files
+    log "DEBUG" "Cleaning up test files"
+    rm -f "$qr_file" "$csv_file" "$reconstructed_file"
+}
+
+# Now run the CSV conversion tests
+run_csv_conversion_test "CSV Conversion Basic" "CSV Conversion Test Data" 1 "M" 10 4 "black" "white" "PNG"
+run_csv_conversion_test "CSV Conversion Colors" "Color Test Data" 1 "M" 10 4 "blue" "yellow" "PNG"
+run_csv_conversion_test "CSV Conversion Version 5" "$(generate_random_text 50)" 5 "Q" 10 4 "black" "white" "PNG"
+run_csv_conversion_test "CSV Conversion High Error Correction" "$(generate_random_text 30)" 1 "H" 10 4 "black" "white" "PNG"
+run_csv_conversion_test "CSV Conversion Unicode" "Unicode test: ñáéíóú" 1 "M" 10 4 "black" "white" "PNG"
+
 # Summary
 echo ""
 log "INFO" "Test execution completed"

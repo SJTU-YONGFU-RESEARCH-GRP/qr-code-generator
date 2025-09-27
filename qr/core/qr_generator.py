@@ -14,11 +14,16 @@ from PIL import Image
 from qrcode.constants import ERROR_CORRECT_L, ERROR_CORRECT_M, ERROR_CORRECT_Q, ERROR_CORRECT_H
 
 try:
-    from pyzbar.pyzbar import decode as pyzbar_decode
     from PIL import Image as PILImage
     PYZBAR_AVAILABLE = True
+    # Import pyzbar only when needed to avoid Windows DLL issues
+    def _import_pyzbar():
+        from pyzbar.pyzbar import decode as pyzbar_decode
+        return pyzbar_decode
 except ImportError:
     PYZBAR_AVAILABLE = False
+    def _import_pyzbar():
+        raise ImportError("pyzbar not available")
 
 logger = logging.getLogger(__name__)
 
@@ -562,6 +567,7 @@ class QRCodeGenerator:
                 if PYZBAR_AVAILABLE:
                     logger.debug("Trying pyzbar as fallback decoder")
                     try:
+                        pyzbar_decode = _import_pyzbar()
                         pil_img = PILImage.open(image_path)
                         decoded_objects = pyzbar_decode(pil_img)
                         if decoded_objects:
@@ -581,3 +587,170 @@ class QRCodeGenerator:
         except Exception as e:
             logger.error(f"Error decoding QR code from {image_path}: {e}")
             raise ValueError(f"Failed to decode QR code from {image_path}.") from e
+
+    @staticmethod
+    def image_to_csv_matrix(image_path: Union[str, Path], csv_path: Union[str, Path]) -> None:
+        """Convert QR code image to CSV matrix format with 1s and 0s.
+
+        This method extracts the binary pattern from a QR code image and saves it
+        as a CSV file where each cell represents a module (1 for black/dark, 0 for white/light).
+
+        Args:
+            image_path (Union[str, Path]): Path to the QR code image file.
+            csv_path (Union[str, Path]): Path to save the CSV matrix file.
+
+        Raises:
+            ValueError: If the image cannot be processed or saved.
+        """
+        import csv
+        import numpy as np
+
+        image_path = Path(image_path)
+        csv_path = Path(csv_path)
+
+        try:
+            logger.debug(f"Loading image from {image_path} for CSV conversion")
+
+            # Load image with PIL for better compatibility
+            pil_img = Image.open(image_path).convert('L')  # Convert to grayscale
+            img_array = np.array(pil_img)
+
+            # Threshold to get binary pattern (black=1, white=0)
+            # Use a threshold that works well for QR codes (typically dark modules on light background)
+            threshold = 128
+            binary_matrix = (img_array < threshold).astype(int)
+
+            # Find the QR code bounds by looking for the actual QR pattern
+            # QR codes have finder patterns at corners, so we look for the border
+            height, width = binary_matrix.shape
+
+            # Find left edge of QR code (first column with many black pixels)
+            left = 0
+            for col in range(width):
+                if np.sum(binary_matrix[:, col]) > height * 0.1:  # At least 10% black pixels
+                    left = col
+                    break
+
+            # Find right edge of QR code (last column with many black pixels)
+            right = width - 1
+            for col in range(width - 1, -1, -1):
+                if np.sum(binary_matrix[:, col]) > height * 0.1:
+                    right = col
+                    break
+
+            # Find top edge of QR code (first row with many black pixels)
+            top = 0
+            for row in range(height):
+                if np.sum(binary_matrix[row, :]) > width * 0.1:
+                    top = row
+                    break
+
+            # Find bottom edge of QR code (last row with many black pixels)
+            bottom = height - 1
+            for row in range(height - 1, -1, -1):
+                if np.sum(binary_matrix[row, :]) > width * 0.1:
+                    bottom = row
+                    break
+
+            # Extract the QR code matrix (remove borders and get just the data area)
+            # Add some padding to ensure we capture the full QR pattern
+            padding = 2
+            qr_matrix = binary_matrix[
+                max(0, top - padding):min(height, bottom + padding + 1),
+                max(0, left - padding):min(width, right + padding + 1)
+            ]
+
+            logger.debug(f"Extracted QR matrix shape: {qr_matrix.shape}")
+
+            # Ensure the matrix is square (QR codes are square)
+            min_dim = min(qr_matrix.shape)
+            qr_matrix = qr_matrix[:min_dim, :min_dim]
+
+            # Create CSV directory if it doesn't exist
+            csv_path.parent.mkdir(parents=True, exist_ok=True)
+
+            # Save matrix to CSV
+            with open(csv_path, 'w', newline='', encoding='utf-8') as csvfile:
+                writer = csv.writer(csvfile)
+                for row in qr_matrix:
+                    writer.writerow(row.tolist())
+
+            logger.info(f"QR code matrix saved to CSV: {csv_path} (shape: {qr_matrix.shape})")
+
+        except Exception as e:
+            logger.error(f"Error converting image to CSV matrix: {e}")
+            raise ValueError(f"Failed to convert image {image_path} to CSV matrix.") from e
+
+    @staticmethod
+    def csv_matrix_to_image(csv_path: Union[str, Path], image_path: Union[str, Path], box_size: int = 1) -> None:
+        """Convert CSV matrix format to QR code image.
+
+        This method reads a CSV file containing a binary matrix (1s and 0s)
+        and generates a QR code image from it.
+
+        Args:
+            csv_path (Union[str, Path]): Path to the CSV matrix file.
+            image_path (Union[str, Path]): Path to save the QR code image.
+            box_size (int): Size of each module in pixels (default: 1).
+
+        Raises:
+            ValueError: If the CSV cannot be read or the image cannot be generated.
+        """
+        import csv
+        import numpy as np
+
+        csv_path = Path(csv_path)
+        image_path = Path(image_path)
+
+        try:
+            logger.debug(f"Loading CSV matrix from {csv_path} for image conversion")
+
+            # Read CSV matrix
+            matrix = []
+            with open(csv_path, 'r', newline='', encoding='utf-8') as csvfile:
+                reader = csv.reader(csvfile)
+                for row in reader:
+                    if row:  # Skip empty rows
+                        matrix.append([int(cell) for cell in row])
+
+            if not matrix:
+                raise ValueError("CSV file is empty or contains no valid data")
+
+            # Convert to numpy array
+            qr_matrix = np.array(matrix, dtype=np.uint8)
+
+            # Ensure matrix is square
+            if qr_matrix.shape[0] != qr_matrix.shape[1]:
+                logger.warning(f"Matrix is not square ({qr_matrix.shape}), using largest dimension")
+                min_dim = min(qr_matrix.shape)
+                qr_matrix = qr_matrix[:min_dim, :min_dim]
+
+            # Create image from matrix
+            height, width = qr_matrix.shape
+            img_array = np.zeros((height * box_size, width * box_size), dtype=np.uint8)
+
+            # Fill image array based on matrix values
+            for i in range(height):
+                for j in range(width):
+                    if qr_matrix[i, j] == 1:  # Black/dark module
+                        fill_value = 0  # Black
+                    else:  # White/light module
+                        fill_value = 255  # White
+
+                    # Fill the corresponding block
+                    img_array[i * box_size:(i + 1) * box_size,
+                             j * box_size:(j + 1) * box_size] = fill_value
+
+            # Create PIL image and save
+            img = Image.fromarray(img_array, mode='L')
+
+            # Create output directory if it doesn't exist
+            image_path.parent.mkdir(parents=True, exist_ok=True)
+
+            # Save image
+            img.save(image_path)
+            logger.info(f"QR code image generated from CSV matrix: {image_path} (size: {img.size})")
+
+        except Exception as e:
+            logger.error(f"Error converting CSV matrix to image: {e}")
+            raise ValueError(f"Failed to convert CSV matrix {csv_path} to image.") from e
