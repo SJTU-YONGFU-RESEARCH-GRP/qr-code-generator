@@ -1,14 +1,15 @@
 """QR Code Generator Module.
 
-This module provides functionality to generate QR codes from input data.
+This module provides functionality to generate QR codes from input data with pattern customization.
 """
 
 import csv
 import logging
 from pathlib import Path
-from typing import Optional, Union
+from typing import List, Optional, Tuple, Union
 
 import cv2
+import numpy as np
 import qrcode
 from PIL import Image
 from qrcode.constants import ERROR_CORRECT_L, ERROR_CORRECT_M, ERROR_CORRECT_Q, ERROR_CORRECT_H
@@ -29,10 +30,11 @@ logger = logging.getLogger(__name__)
 
 
 class QRCodeGenerator:
-    """A class for generating QR codes with customizable options.
+    """A class for generating QR codes with customizable options and pattern control.
 
     This class handles the creation of QR codes from text data, supporting
-    various error correction levels, box sizes, and output formats.
+    various error correction levels, box sizes, output formats, and pattern customization
+    for testing and analysis purposes.
 
     Attributes:
         data (str): The data to encode in the QR code.
@@ -43,6 +45,11 @@ class QRCodeGenerator:
         fill_color (str): Color for the QR code modules.
         back_color (str): Background color.
         image_format (str): Output image format (e.g., 'PNG', 'JPEG').
+        finder_patterns (bool): Whether to include finder patterns (corner squares).
+        alignment_patterns (bool): Whether to include alignment patterns.
+        timing_patterns (bool): Whether to include timing patterns.
+        version_info (bool): Whether to include version information.
+        format_info (bool): Whether to include format information.
     """
 
     def __init__(
@@ -55,6 +62,11 @@ class QRCodeGenerator:
         fill_color: str = "black",
         back_color: str = "white",
         image_format: str = "PNG",
+        finder_patterns: bool = True,
+        alignment_patterns: bool = True,
+        timing_patterns: bool = True,
+        version_info: bool = True,
+        format_info: bool = True,
     ) -> None:
         """Initialize the QR Code Generator.
 
@@ -67,6 +79,11 @@ class QRCodeGenerator:
             fill_color (str): Color for QR modules (default: "black").
             back_color (str): Background color (default: "white").
             image_format (str): Output image format (default: "PNG").
+            finder_patterns (bool): Whether to include finder patterns (default: True).
+            alignment_patterns (bool): Whether to include alignment patterns (default: True).
+            timing_patterns (bool): Whether to include timing patterns (default: True).
+            version_info (bool): Whether to include version information (default: True).
+            format_info (bool): Whether to include format information (default: True).
 
         Raises:
             ValueError: If version is not between 1 and 39, or if box_size/border are non-positive.
@@ -88,11 +105,18 @@ class QRCodeGenerator:
         self.fill_color = fill_color
         self.back_color = back_color
         self.image_format = image_format
+        self.finder_patterns = finder_patterns
+        self.alignment_patterns = alignment_patterns
+        self.timing_patterns = timing_patterns
+        self.version_info = version_info
+        self.format_info = format_info
 
         logger.info(
             f"QRCodeGenerator initialized for data: '{data[:50]}...' with version {version}, "
             f"error correction {['L', 'M', 'Q', 'H'][error_correction]}, box_size {box_size}, border {border}, "
-            f"fill_color {fill_color}, back_color {back_color}, format {image_format}."
+            f"fill_color {fill_color}, back_color {back_color}, format {image_format}, "
+            f"patterns: finder={finder_patterns}, alignment={alignment_patterns}, timing={timing_patterns}, "
+            f"version_info={version_info}, format_info={format_info}."
         )
 
     def generate_qr_code(self) -> qrcode.QRCode:
@@ -141,8 +165,17 @@ class QRCodeGenerator:
         output_path = Path(output_path)
 
         try:
+            # Generate QR code matrix and apply pattern customizations
+            qr_matrix = np.array(qr.get_matrix(), dtype=np.uint8)
+
+            # Apply pattern customizations if any patterns are disabled
+            if not (self.finder_patterns and self.alignment_patterns and
+                    self.timing_patterns and self.version_info and self.format_info):
+                qr_matrix = self._apply_pattern_customizations(qr_matrix)
+
             logger.debug(f"Creating image with fill_color={self.fill_color}, back_color={self.back_color}")
-            img = qr.make_image(fill_color=self.fill_color, back_color=self.back_color)
+            # Create image from the modified matrix
+            img = self._create_image_from_matrix(qr_matrix)
             logger.debug(f"Saving image to {output_path} in format {self.image_format}")
             img.save(output_path, self.image_format)
             logger.info(f"QR code saved successfully to {output_path}.")
@@ -162,13 +195,266 @@ class QRCodeGenerator:
         qr = self.generate_qr_code()
 
         try:
+            # Generate QR code matrix and apply pattern customizations
+            qr_matrix = np.array(qr.get_matrix(), dtype=np.uint8)
+
+            # Apply pattern customizations if any patterns are disabled
+            if not (self.finder_patterns and self.alignment_patterns and
+                    self.timing_patterns and self.version_info and self.format_info):
+                qr_matrix = self._apply_pattern_customizations(qr_matrix)
+
             logger.debug(f"Creating image object with fill_color={self.fill_color}, back_color={self.back_color}")
-            img = qr.make_image(fill_color=self.fill_color, back_color=self.back_color)
+            # Create image from the modified matrix
+            img = self._create_image_from_matrix(qr_matrix)
             logger.info(f"QR code image generated successfully (size: {img.size}).")
             return img
         except Exception as e:
             logger.error(f"Error generating QR code image: {e}")
             raise ValueError("Failed to generate QR code image.") from e
+
+    def _create_image_from_matrix(self, qr_matrix: np.ndarray) -> Image.Image:
+        """Create PIL Image from QR code matrix with colors.
+
+        Args:
+            qr_matrix (np.ndarray): QR code matrix (0=white, 1=black).
+
+        Returns:
+            Image.Image: PIL Image object.
+        """
+        # Create image from matrix
+        height, width = qr_matrix.shape
+        img_array = np.zeros((height * self.box_size, width * self.box_size), dtype=np.uint8)
+
+        # Fill image array based on matrix values
+        for i in range(height):
+            for j in range(width):
+                if qr_matrix[i, j] == 1:  # Black/dark module
+                    fill_value = 0  # Black
+                else:  # White/light module
+                    fill_value = 255  # White
+
+                # Fill the corresponding block
+                img_array[i * self.box_size:(i + 1) * self.box_size,
+                         j * self.box_size:(j + 1) * self.box_size] = fill_value
+
+        # Create PIL image
+        img = Image.fromarray(img_array, mode='L')
+
+        # Apply colors if specified (convert to RGB for colored output)
+        if self.fill_color != "black" or self.back_color != "white":
+            # Convert to RGB
+            img = img.convert('RGB')
+
+            # Create color mapping
+            pixels = img.load()
+            for i in range(img.size[0]):
+                for j in range(img.size[1]):
+                    if pixels[i, j] == (0, 0, 0):  # Black pixel
+                        # Parse fill_color (could be "black", "blue", "#FF0000", etc.)
+                        try:
+                            from PIL import ImageColor
+                            pixels[i, j] = ImageColor.getrgb(self.fill_color)
+                        except:
+                            pixels[i, j] = (0, 0, 0)  # Fallback to black
+                    else:  # White pixel
+                        # Parse back_color
+                        try:
+                            from PIL import ImageColor
+                            pixels[i, j] = ImageColor.getrgb(self.back_color)
+                        except:
+                            pixels[i, j] = (255, 255, 255)  # Fallback to white
+
+        return img
+
+    def _apply_pattern_customizations(self, qr_matrix: np.ndarray) -> np.ndarray:
+        """Apply pattern customizations to the QR code matrix.
+
+        Args:
+            qr_matrix (np.ndarray): The QR code matrix to modify.
+
+        Returns:
+            np.ndarray: The modified QR code matrix with pattern customizations applied.
+        """
+        logger.debug("Applying pattern customizations to QR matrix")
+
+        # Finder patterns are the 3 corner squares (7x7 for version 1, larger for higher versions)
+        # They consist of a 3x3 black square with a 5x5 white border and 7x7 black border
+        matrix_size = len(qr_matrix)
+
+        if not self.finder_patterns:
+            logger.debug("Removing finder patterns")
+            self._remove_finder_patterns(qr_matrix, matrix_size)
+
+        if not self.alignment_patterns and self.version > 1:
+            logger.debug("Removing alignment patterns")
+            self._remove_alignment_patterns(qr_matrix, matrix_size)
+
+        if not self.timing_patterns:
+            logger.debug("Removing timing patterns")
+            self._remove_timing_patterns(qr_matrix, matrix_size)
+
+        if not self.version_info and self.version >= 7:
+            logger.debug("Removing version information")
+            self._remove_version_info(qr_matrix, matrix_size)
+
+        if not self.format_info:
+            logger.debug("Removing format information")
+            self._remove_format_info(qr_matrix, matrix_size)
+
+        return qr_matrix
+
+    def _remove_finder_patterns(self, qr_matrix: np.ndarray, matrix_size: int) -> None:
+        """Remove finder patterns from QR code matrix.
+
+        Args:
+            qr_matrix (np.ndarray): QR code matrix to modify.
+            matrix_size (int): Size of the matrix.
+        """
+        # Finder patterns are located at:
+        # - Top-left: rows 0-8, cols 0-8 (for version 1)
+        # - Top-right: rows 0-8, cols matrix_size-9 to matrix_size-1
+        # - Bottom-left: rows matrix_size-9 to matrix_size-1, cols 0-8
+
+        finder_size = 9  # Standard finder pattern size including quiet zone
+
+        # Top-left finder pattern
+        qr_matrix[0:finder_size, 0:finder_size] = 0
+
+        # Top-right finder pattern
+        qr_matrix[0:finder_size, matrix_size-finder_size:matrix_size] = 0
+
+        # Bottom-left finder pattern
+        qr_matrix[matrix_size-finder_size:matrix_size, 0:finder_size] = 0
+
+    def _remove_alignment_patterns(self, qr_matrix: np.ndarray, matrix_size: int) -> None:
+        """Remove alignment patterns from QR code matrix.
+
+        Args:
+            qr_matrix (np.ndarray): QR code matrix to modify.
+            matrix_size (int): Size of the matrix.
+        """
+        # Alignment patterns appear in QR codes version 2 and above
+        # They are 5x5 patterns for most versions
+        if self.version < 2:
+            return
+
+        # Get alignment pattern positions for this version
+        alignment_positions = self._get_alignment_pattern_positions()
+
+        for row, col in alignment_positions:
+            if 0 <= row < matrix_size and 0 <= col < matrix_size:
+                # Remove 5x5 alignment pattern centered at (row, col)
+                start_row = max(0, row - 2)
+                end_row = min(matrix_size, row + 3)
+                start_col = max(0, col - 2)
+                end_col = min(matrix_size, col + 3)
+
+                qr_matrix[start_row:end_row, start_col:end_col] = 0
+
+    def _get_alignment_pattern_positions(self) -> List[Tuple[int, int]]:
+        """Get alignment pattern positions for the current QR code version.
+
+        Returns:
+            List[Tuple[int, int]]: List of (row, col) positions for alignment patterns.
+        """
+        # Standard QR code alignment pattern positions
+        # For version 1: no alignment patterns
+        # For version 2+: positions depend on version
+
+        if self.version == 1:
+            return []
+
+        # Simplified alignment pattern positions for common versions
+        alignment_patterns = {
+            2: [(6, 6), (matrix_size - 7, 6), (6, matrix_size - 7)],
+            3: [(6, 6), (matrix_size - 7, 6), (6, matrix_size - 7), (matrix_size - 7, matrix_size - 7)],
+            4: [(6, 6), (matrix_size - 7, 6), (6, matrix_size - 7)],
+            5: [(6, 6), (matrix_size - 7, 6), (6, matrix_size - 7), (matrix_size - 7, matrix_size - 7)],
+            6: [(6, 6), (matrix_size - 7, 6), (6, matrix_size - 7)],
+            7: [(6, 6), (matrix_size - 7, 6), (6, matrix_size - 7), (matrix_size - 7, matrix_size - 7)],
+        }
+
+        matrix_size = 21 + (self.version - 1) * 4  # Calculate actual matrix size
+        positions = alignment_patterns.get(self.version, [])
+
+        # Add center alignment pattern for larger versions
+        if self.version >= 8:
+            center_pos = matrix_size // 2
+            if (center_pos, center_pos) not in positions:
+                positions.append((center_pos, center_pos))
+
+        return positions
+
+    def _remove_timing_patterns(self, qr_matrix: np.ndarray, matrix_size: int) -> None:
+        """Remove timing patterns from QR code matrix.
+
+        Args:
+            qr_matrix (np.ndarray): QR code matrix to modify.
+            matrix_size (int): Size of the matrix.
+        """
+        # Timing patterns are alternating black/white lines between finder patterns
+        # Horizontal timing pattern: row 6, columns 8 to matrix_size-9
+        # Vertical timing pattern: column 6, rows 8 to matrix_size-9
+
+        # Horizontal timing pattern (skip finder pattern areas)
+        for col in range(8, matrix_size - 8):
+            if col != 6:  # Skip the vertical timing pattern intersection
+                qr_matrix[6, col] = 0
+
+        # Vertical timing pattern (skip finder pattern areas)
+        for row in range(8, matrix_size - 8):
+            if row != 6:  # Skip the horizontal timing pattern intersection
+                qr_matrix[row, 6] = 0
+
+    def _remove_version_info(self, qr_matrix: np.ndarray, matrix_size: int) -> None:
+        """Remove version information from QR code matrix.
+
+        Args:
+            qr_matrix (np.ndarray): QR code matrix to modify.
+            matrix_size (int): Size of the matrix.
+        """
+        # Version information appears in version 7+ QR codes
+        # Located at: rows 0-5, columns matrix_size-11 to matrix_size-9 (top-right)
+        # And: columns 0-5, rows matrix_size-11 to matrix_size-9 (bottom-left)
+
+        if self.version < 7:
+            return
+
+        # Top-right version info
+        qr_matrix[0:6, matrix_size-11:matrix_size-8] = 0
+
+        # Bottom-left version info
+        qr_matrix[matrix_size-11:matrix_size-8, 0:6] = 0
+
+    def _remove_format_info(self, qr_matrix: np.ndarray, matrix_size: int) -> None:
+        """Remove format information from QR code matrix.
+
+        Args:
+            qr_matrix (np.ndarray): QR code matrix to modify.
+            matrix_size (int): Size of the matrix.
+        """
+        # Format information is located near finder patterns
+        # Top: row 8, columns 0-8 (but skip finder pattern)
+        # Bottom: column 8, rows matrix_size-8 to matrix_size-1 (but skip finder pattern)
+        # Left: column 8, rows 0-8 (but skip finder pattern)
+        # Right: row 8, columns matrix_size-8 to matrix_size-1 (but skip finder pattern)
+
+        # Remove format info areas (set to 0 = white)
+        # Top format info (row 8, columns 0-5 and 7-8)
+        qr_matrix[8, 0:6] = 0
+        qr_matrix[8, 7:9] = 0
+
+        # Bottom format info (column 8, rows matrix_size-8 to matrix_size-1, but skip last 8)
+        bottom_start = matrix_size - 8
+        qr_matrix[bottom_start:matrix_size-1, 8] = 0
+
+        # Left format info (column 8, rows 0-5 and 7-8)
+        qr_matrix[0:6, 8] = 0
+        qr_matrix[7:9, 8] = 0
+
+        # Right format info (row 8, columns matrix_size-8 to matrix_size-1, but skip first 8)
+        right_start = matrix_size - 8
+        qr_matrix[8, right_start:matrix_size-1] = 0
 
     def save_qr_code_with_csv(
         self,
@@ -230,6 +516,11 @@ class QRCodeGenerator:
             "fill_color": self.fill_color,
             "back_color": self.back_color,
             "image_format": self.image_format,
+            "finder_patterns": self.finder_patterns,
+            "alignment_patterns": self.alignment_patterns,
+            "timing_patterns": self.timing_patterns,
+            "version_info": self.version_info,
+            "format_info": self.format_info,
             "image_path": str(image_path),
         }
 
@@ -294,6 +585,11 @@ class QRCodeGenerator:
             "fill_color": csv_row.get("fill_color", "black"),
             "back_color": csv_row.get("back_color", "white"),
             "image_format": csv_row.get("image_format", "PNG"),
+            "finder_patterns": csv_row.get("finder_patterns", "True").lower() == "true",
+            "alignment_patterns": csv_row.get("alignment_patterns", "True").lower() == "true",
+            "timing_patterns": csv_row.get("timing_patterns", "True").lower() == "true",
+            "version_info": csv_row.get("version_info", "True").lower() == "true",
+            "format_info": csv_row.get("format_info", "True").lower() == "true",
         }
 
         return cls(**params)
@@ -326,6 +622,11 @@ class QRCodeGenerator:
             "fill_color": "black",
             "back_color": "white",
             "image_format": "PNG",
+            "finder_patterns": True,
+            "alignment_patterns": True,
+            "timing_patterns": True,
+            "version_info": True,
+            "format_info": True,
         }
         default_params.update(kwargs)
 

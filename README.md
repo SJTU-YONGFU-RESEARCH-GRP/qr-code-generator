@@ -44,20 +44,6 @@ A Python CLI tool and library for generating QR codes from text data, URLs, or o
 - 🔄 **CSV binary matrix conversion** for AI modeling and computer vision
 - 📦 **Batch processing** from CSV files
 
-### Key Features
-
-- 🚀 **Generate QR codes** from text, URLs, or any string data
-- 📏 **Customizable versions** (1-40) for different sizes and capacities
-- 🛡️ **Multiple error correction levels** (L, M, Q, H) for robustness
-- 🎨 **Custom colors** and styling options
-- 📷 **Multiple image formats** (PNG, JPEG, BMP) support
-- 🔍 **QR decoding** functionality for verification
-- 📊 **Comprehensive logging** and error handling
-- 🧪 **Full test coverage** with pytest
-- ⚡ **Fast processing** with PIL and qrcode libraries
-- 🔄 **CSV binary matrix conversion** for AI modeling and computer vision
-- 📦 **Batch processing** from CSV files
-
 ## Understanding QR Codes
 
 QR codes have a sophisticated structure designed for reliable data encoding and decoding. Understanding this structure is essential for advanced applications like AI modeling and computer vision analysis.

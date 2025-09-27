@@ -26,6 +26,7 @@ Examples:
   python -m qr.main "https://example.com" -o qr_code.png
   python -m qr.main "Hello World" --version 5 --error-correction H --box-size 15
   python -m qr.main "Text data" -f JPEG --fill-color blue --back-color white
+  python -m qr.main "Pattern test" --no-finder-patterns --no-timing-patterns -o test_patterns.png
   python -m qr.main --image-to-csv qr_code.png --csv-output qr_matrix.csv
   python -m qr.main --csv-to-image qr_matrix.csv --output qr_from_matrix.png --box-size 5
         """,
@@ -102,6 +103,37 @@ Examples:
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
         help="Logging level (default: INFO).",
+    )
+
+    # Pattern customization options
+    parser.add_argument(
+        "--no-finder-patterns",
+        action="store_true",
+        help="Disable finder patterns (corner squares) in the QR code.",
+    )
+
+    parser.add_argument(
+        "--no-alignment-patterns",
+        action="store_true",
+        help="Disable alignment patterns in the QR code.",
+    )
+
+    parser.add_argument(
+        "--no-timing-patterns",
+        action="store_true",
+        help="Disable timing patterns in the QR code.",
+    )
+
+    parser.add_argument(
+        "--no-version-info",
+        action="store_true",
+        help="Disable version information in the QR code (version 7+ only).",
+    )
+
+    parser.add_argument(
+        "--no-format-info",
+        action="store_true",
+        help="Disable format information in the QR code.",
     )
 
     # CSV functionality
@@ -210,6 +242,17 @@ Examples:
                 override_params['back_color'] = args.back_color
             if hasattr(args, 'image_format') and args.image_format != "PNG":
                 override_params['image_format'] = args.image_format
+            # Pattern overrides
+            if hasattr(args, 'no_finder_patterns'):
+                override_params['finder_patterns'] = not args.no_finder_patterns
+            if hasattr(args, 'no_alignment_patterns'):
+                override_params['alignment_patterns'] = not args.no_alignment_patterns
+            if hasattr(args, 'no_timing_patterns'):
+                override_params['timing_patterns'] = not args.no_timing_patterns
+            if hasattr(args, 'no_version_info'):
+                override_params['version_info'] = not args.no_version_info
+            if hasattr(args, 'no_format_info'):
+                override_params['format_info'] = not args.no_format_info
 
             logging.info(f"Regenerating QR codes from directory {args.regenerate_dir}")
             successful = QRCodeGenerator.regenerate_from_images(
@@ -247,6 +290,17 @@ Examples:
                 override_params['back_color'] = args.back_color
             if args.image_format != "PNG":
                 override_params['image_format'] = args.image_format
+            # Pattern overrides
+            if args.no_finder_patterns:
+                override_params['finder_patterns'] = False
+            if args.no_alignment_patterns:
+                override_params['alignment_patterns'] = False
+            if args.no_timing_patterns:
+                override_params['timing_patterns'] = False
+            if args.no_version_info:
+                override_params['version_info'] = False
+            if args.no_format_info:
+                override_params['format_info'] = False
 
             generator = QRCodeGenerator.from_image(args.from_image, **override_params)
 
@@ -319,6 +373,11 @@ Examples:
                 fill_color=args.fill_color,
                 back_color=args.back_color,
                 image_format=args.image_format,
+                finder_patterns=not args.no_finder_patterns,
+                alignment_patterns=not args.no_alignment_patterns,
+                timing_patterns=not args.no_timing_patterns,
+                version_info=not args.no_version_info,
+                format_info=not args.no_format_info,
             )
 
             logging.info(f"Saving QR code to {args.output}")

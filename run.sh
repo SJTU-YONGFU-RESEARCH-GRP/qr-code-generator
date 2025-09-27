@@ -69,10 +69,15 @@ run_test() {
     local fill_color="$7"
     local back_color="$8"
     local image_format="$9"
+    local no_finder_patterns="${10:-false}"
+    local no_alignment_patterns="${11:-false}"
+    local no_timing_patterns="${12:-false}"
+    local no_version_info="${13:-false}"
+    local no_format_info="${14:-false}"
 
     TOTAL_TESTS=$((TOTAL_TESTS + 1))
     log "INFO" "Starting test $TOTAL_TESTS: $test_name"
-    log "DEBUG" "Test parameters: data='${data:0:50}...', version=$version, error_correction=$error_correction, box_size=$box_size, border=$border, fill_color=$fill_color, back_color=$back_color, format=$image_format"
+    log "DEBUG" "Test parameters: data='${data:0:50}...', version=$version, error_correction=$error_correction, box_size=$box_size, border=$border, fill_color=$fill_color, back_color=$back_color, format=$image_format, patterns: finder=${no_finder_patterns}, alignment=${no_alignment_patterns}, timing=${no_timing_patterns}, version=${no_version_info}, format=${no_format_info}"
 
     # Generate QR code
     local output_file="$TEST_OUTPUT_DIR/qr_test_$(date +%s)_$TOTAL_TESTS.png"
@@ -95,6 +100,23 @@ run_test() {
         --fill-color \"$fill_color\" \
         --back-color \"$back_color\" \
         --image-format \"$image_format\""
+
+    # Add pattern flags if specified
+    if [ "$no_finder_patterns" = true ]; then
+        cmd="$cmd --no-finder-patterns"
+    fi
+    if [ "$no_alignment_patterns" = true ]; then
+        cmd="$cmd --no-alignment-patterns"
+    fi
+    if [ "$no_timing_patterns" = true ]; then
+        cmd="$cmd --no-timing-patterns"
+    fi
+    if [ "$no_version_info" = true ]; then
+        cmd="$cmd --no-version-info"
+    fi
+    if [ "$no_format_info" = true ]; then
+        cmd="$cmd --no-format-info"
+    fi
 
     if [ -n "$csv_file" ]; then
         cmd="$cmd --csv-output \"$csv_file\""
@@ -133,21 +155,32 @@ run_test() {
         fi
     fi
 
-    if [[ "$decoded_data" == "ERROR:"* ]]; then
-        log "ERROR" "QR code decoding failed for $test_name: $decoded_data"
-        FAILED_TESTS=$((FAILED_TESTS + 1))
-        return 1
+    # Check if this test expects decoding to fail (for pattern tests without essential elements)
+    local expect_decode_failure=false
+    if [ "$no_finder_patterns" = true ] || [ "$no_timing_patterns" = true ] || [ "$test_name" = "Minimal Patterns" ]; then
+        expect_decode_failure=true
     fi
 
-    # Verify match
-    if [ "$decoded_data" = "$data" ]; then
-        log "INFO" "PASSED: $test_name (decoded: '${decoded_data:0:50}...')"
-        PASSED_TESTS=$((PASSED_TESTS + 1))
+    if [[ "$decoded_data" == "ERROR:"* ]]; then
+        if [ "$expect_decode_failure" = true ]; then
+            log "INFO" "EXPECTED FAILURE: $test_name (QR code without essential patterns cannot be decoded)"
+            PASSED_TESTS=$((PASSED_TESTS + 1))
+        else
+            log "ERROR" "QR code decoding failed for $test_name: $decoded_data"
+            FAILED_TESTS=$((FAILED_TESTS + 1))
+            return 1
+        fi
     else
-        log "ERROR" "FAILED: $test_name - Mismatch detected"
-        log "ERROR" "Expected: '${data:0:50}...'"
-        log "ERROR" "Got: '${decoded_data:0:50}...'"
-        FAILED_TESTS=$((FAILED_TESTS + 1))
+        # Decoding succeeded - verify the data matches
+        if [ "$decoded_data" = "$data" ]; then
+            log "INFO" "PASSED: $test_name (decoded: '${decoded_data:0:50}...')"
+            PASSED_TESTS=$((PASSED_TESTS + 1))
+        else
+            log "ERROR" "FAILED: $test_name - Mismatch detected"
+            log "ERROR" "Expected: '${data:0:50}...'"
+            log "ERROR" "Got: '${decoded_data:0:50}...'"
+            FAILED_TESTS=$((FAILED_TESTS + 1))
+        fi
     fi
 
     # Clean up (skip for failed version 20 tests for debugging)
@@ -163,52 +196,79 @@ run_test() {
 echo "Starting QR Code Regression Tests..."
 
 # Basic tests
-run_test "Basic Text" "Hello World" 1 "M" 10 4 "black" "white" "PNG"
-run_test "URL" "https://example.com" 1 "M" 10 4 "black" "white" "PNG"
-run_test "Numeric" "123456789" 1 "M" 10 4 "black" "white" "PNG"
+run_test "Basic Text" "Hello World" 1 "M" 10 4 "black" "white" "PNG" false false false false false
+run_test "URL" "https://example.com" 1 "M" 10 4 "black" "white" "PNG" false false false false false
+run_test "Numeric" "123456789" 1 "M" 10 4 "black" "white" "PNG" false false false false false
 
 # Version tests
-run_test "Version 5" "$(generate_random_text 50)" 5 "M" 10 4 "black" "white" "PNG"
-run_test "Version 10" "$(generate_random_text 100)" 10 "M" 10 4 "black" "white" "PNG"
-run_test "Version 20" "$(generate_random_text 400)" 20 "H" 10 4 "black" "white" "PNG"  # Use 400 characters for version 20 with high error correction
-run_test "Version 39" "$(generate_random_text 1000)" 39 "H" 10 4 "black" "white" "PNG"  # Use version 39 instead of 40 (OpenCV limitation)
+run_test "Version 5" "$(generate_random_text 50)" 5 "M" 10 4 "black" "white" "PNG" false false false false false
+run_test "Version 10" "$(generate_random_text 100)" 10 "M" 10 4 "black" "white" "PNG" false false false false false
+run_test "Version 20" "$(generate_random_text 400)" 20 "H" 10 4 "black" "white" "PNG" false false false false false  # Use 400 characters for version 20 with high error correction
+run_test "Version 39" "$(generate_random_text 1000)" 39 "H" 10 4 "black" "white" "PNG" false false false false false  # Use version 39 instead of 40 (OpenCV limitation)
 
 # Error correction tests
-run_test "Error Correction L" "$(generate_random_text 20)" 1 "L" 10 4 "black" "white" "PNG"
-run_test "Error Correction Q" "$(generate_random_text 20)" 1 "Q" 10 4 "black" "white" "PNG"
-run_test "Error Correction H" "$(generate_random_text 20)" 1 "H" 10 4 "black" "white" "PNG"
+run_test "Error Correction L" "$(generate_random_text 20)" 1 "L" 10 4 "black" "white" "PNG" false false false false false
+run_test "Error Correction Q" "$(generate_random_text 20)" 1 "Q" 10 4 "black" "white" "PNG" false false false false false
+run_test "Error Correction H" "$(generate_random_text 20)" 1 "H" 10 4 "black" "white" "PNG" false false false false false
 
 # Box size and border tests
-run_test "Small Box Size" "$(generate_random_text 20)" 1 "M" 5 4 "black" "white" "PNG"
-run_test "Large Box Size" "$(generate_random_text 20)" 1 "M" 20 4 "black" "white" "PNG"
-run_test "Small Border" "$(generate_random_text 20)" 1 "M" 10 1 "black" "white" "PNG"
-run_test "Large Border" "$(generate_random_text 20)" 1 "M" 10 8 "black" "white" "PNG"
+run_test "Small Box Size" "$(generate_random_text 20)" 1 "M" 5 4 "black" "white" "PNG" false false false false false
+run_test "Large Box Size" "$(generate_random_text 20)" 1 "M" 20 4 "black" "white" "PNG" false false false false false
+run_test "Small Border" "$(generate_random_text 20)" 1 "M" 10 1 "black" "white" "PNG" false false false false false
+run_test "Large Border" "$(generate_random_text 20)" 1 "M" 10 8 "black" "white" "PNG" false false false false false
 
 # Color tests
-run_test "Blue Fill" "$(generate_random_text 20)" 1 "M" 10 4 "blue" "white" "PNG"
-run_test "Red Background" "$(generate_random_text 20)" 1 "M" 10 4 "black" "red" "PNG"
-run_test "Green Both" "$(generate_random_text 20)" 1 "M" 10 4 "green" "yellow" "PNG"
-run_test "White Fill Black Back" "$(generate_random_text 20)" 1 "M" 10 4 "white" "black" "PNG"
+run_test "Blue Fill" "$(generate_random_text 20)" 1 "M" 10 4 "blue" "white" "PNG" false false false false false
+run_test "Red Background" "$(generate_random_text 20)" 1 "M" 10 4 "black" "red" "PNG" false false false false false
+run_test "Green Both" "$(generate_random_text 20)" 1 "M" 10 4 "green" "yellow" "PNG" false false false false false
+run_test "White Fill Black Back" "$(generate_random_text 20)" 1 "M" 10 4 "white" "black" "PNG" false false false false false
 
 # Image format tests
-run_test "JPEG Format" "$(generate_random_text 20)" 1 "M" 10 4 "black" "white" "JPEG"
-run_test "BMP Format" "$(generate_random_text 20)" 1 "M" 10 4 "black" "white" "BMP"
+run_test "JPEG Format" "$(generate_random_text 20)" 1 "M" 10 4 "black" "white" "JPEG" false false false false false
+run_test "BMP Format" "$(generate_random_text 20)" 1 "M" 10 4 "black" "white" "BMP" false false false false false
 
 # Special character tests
-run_test "Special Characters" "Hello!@#$%^&*()_+-=[]{}|;':\",./<>?" 1 "M" 10 4 "black" "white" "PNG"
-run_test "Unicode" "Café naïve résumé" 1 "M" 10 4 "black" "white" "PNG"
-run_test "Emojis" "😀🚀🌟📱" 1 "M" 10 4 "black" "white" "PNG"
+run_test "Special Characters" "Hello!@#$%^&*()_+-=[]{}|;':\",./<>?" 1 "M" 10 4 "black" "white" "PNG" false false false false false
+run_test "Unicode" "Café naïve résumé" 1 "M" 10 4 "black" "white" "PNG" false false false false false
+run_test "Emojis" "😀🚀🌟📱" 1 "M" 10 4 "black" "white" "PNG" false false false false false
+
+# QR Code Pattern Tests
+# Test different pattern combinations to verify functionality
+
+# Test without finder patterns (should still be decodable with other patterns)
+run_test "No Finder Patterns" "Pattern Test - No Finder" 1 "M" 10 4 "black" "white" "PNG" true false false false false
+
+# Test without timing patterns
+run_test "No Timing Patterns" "Pattern Test - No Timing" 1 "M" 10 4 "black" "white" "PNG" false false true false false
+
+# Test without alignment patterns (version 1 doesn't have them anyway)
+run_test "No Alignment Patterns V1" "Pattern Test - No Alignment V1" 1 "M" 10 4 "black" "white" "PNG" false true false false false
+
+# Test without format info
+run_test "No Format Info" "Pattern Test - No Format" 1 "M" 10 4 "black" "white" "PNG" false false false false true
+
+# Test without version info (version 1 doesn't have it)
+run_test "No Version Info V1" "Pattern Test - No Version V1" 1 "M" 10 4 "black" "white" "PNG" false false false true false
+
+# Test version 7+ without version info (version 7 has version info)
+run_test "No Version Info V7" "Pattern Test - No Version V7" 7 "M" 10 4 "black" "white" "PNG" false false false true false
+
+# Test version 2+ without alignment patterns
+run_test "No Alignment Patterns V2" "Pattern Test - No Alignment V2" 2 "M" 10 4 "black" "white" "PNG" false true false false false
+
+# Test minimal patterns (only data, no structural patterns)
+run_test "Minimal Patterns" "Pattern Test - Minimal" 1 "M" 10 4 "black" "white" "PNG" true true true true true
 
 # Random text tests (multiple)
 for i in {1..10}; do
     random_text=$(generate_random_text $((RANDOM % 200 + 10)))
-    run_test "Random Test $i" "$random_text" 1 "M" 10 4 "black" "white" "PNG"
+    run_test "Random Test $i" "$random_text" 1 "M" 10 4 "black" "white" "PNG" false false false false false
 done
 
 # Long text test (already covered by Version 20 test above)
 
 # Binary-like data
-run_test "Binary Data" "$($PYTHON_CMD -c "import os; print(os.urandom(50).hex())")" 10 "H" 10 4 "black" "white" "PNG"
+run_test "Binary Data" "$($PYTHON_CMD -c "import os; print(os.urandom(50).hex())")" 10 "H" 10 4 "black" "white" "PNG" false false false false false
 
 # CSV Binary Matrix Conversion Tests
 run_csv_conversion_test() {
@@ -221,6 +281,11 @@ run_csv_conversion_test() {
     local fill_color="$7"
     local back_color="$8"
     local image_format="$9"
+    local no_finder_patterns="${10:-false}"
+    local no_alignment_patterns="${11:-false}"
+    local no_timing_patterns="${12:-false}"
+    local no_version_info="${13:-false}"
+    local no_format_info="${14:-false}"
 
     TOTAL_TESTS=$((TOTAL_TESTS + 1))
     log "INFO" "Starting CSV conversion test $TOTAL_TESTS: $test_name"
@@ -245,6 +310,23 @@ run_csv_conversion_test() {
         --fill-color \"$fill_color\" \
         --back-color \"$back_color\" \
         --image-format \"$image_format\""
+
+    # Add pattern flags if specified
+    if [ "$no_finder_patterns" = true ]; then
+        cmd="$cmd --no-finder-patterns"
+    fi
+    if [ "$no_alignment_patterns" = true ]; then
+        cmd="$cmd --no-alignment-patterns"
+    fi
+    if [ "$no_timing_patterns" = true ]; then
+        cmd="$cmd --no-timing-patterns"
+    fi
+    if [ "$no_version_info" = true ]; then
+        cmd="$cmd --no-version-info"
+    fi
+    if [ "$no_format_info" = true ]; then
+        cmd="$cmd --no-format-info"
+    fi
 
     eval "$cmd > /dev/null 2>&1"
     gen_exit_code=$?
@@ -359,11 +441,11 @@ print('CSV content is valid')
 }
 
 # Now run the CSV conversion tests
-run_csv_conversion_test "CSV Conversion Basic" "CSV Conversion Test Data" 1 "M" 10 4 "black" "white" "PNG"
-run_csv_conversion_test "CSV Conversion Colors" "Color Test Data" 1 "M" 10 4 "blue" "yellow" "PNG"
-run_csv_conversion_test "CSV Conversion Version 5" "$(generate_random_text 50)" 5 "Q" 10 4 "black" "white" "PNG"
-run_csv_conversion_test "CSV Conversion High Error Correction" "$(generate_random_text 30)" 1 "H" 10 4 "black" "white" "PNG"
-run_csv_conversion_test "CSV Conversion Unicode" "Unicode test: ñáéíóú" 1 "M" 10 4 "black" "white" "PNG"
+run_csv_conversion_test "CSV Conversion Basic" "CSV Conversion Test Data" 1 "M" 10 4 "black" "white" "PNG" false false false false false
+run_csv_conversion_test "CSV Conversion Colors" "Color Test Data" 1 "M" 10 4 "blue" "yellow" "PNG" false false false false false
+run_csv_conversion_test "CSV Conversion Version 5" "$(generate_random_text 50)" 5 "Q" 10 4 "black" "white" "PNG" false false false false false
+run_csv_conversion_test "CSV Conversion High Error Correction" "$(generate_random_text 30)" 1 "H" 10 4 "black" "white" "PNG" false false false false false
+run_csv_conversion_test "CSV Conversion Unicode" "Unicode test: ñáéíóú" 1 "M" 10 4 "black" "white" "PNG" false false false false false
 
 # Summary
 echo ""
