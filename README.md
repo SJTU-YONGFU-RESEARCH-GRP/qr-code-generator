@@ -8,25 +8,29 @@
 [![Issues](https://img.shields.io/github/issues/SJTU-YONGFU-RESEARCH-GRP/qr-code-generator)](https://github.com/SJTU-YONGFU-RESEARCH-GRP/qr-code-generator/issues)
 [![GitHub Stars](https://img.shields.io/github/stars/SJTU-YONGFU-RESEARCH-GRP/qr-code-generator?style=flat-square&logo=github&color=ffdd00&label=⭐%20Stars)](https://github.com/SJTU-YONGFU-RESEARCH-GRP/qr-code-generator/stargazers)
 
-A Python CLI tool for generating QR codes from text data, URLs, or other information. This tool allows you to create customizable QR codes with various error correction levels, sizes, and colors.
+A Python CLI tool and library for generating QR codes from text data, URLs, or other information. This tool allows you to create customizable QR codes with various error correction levels, sizes, and colors.
 
 ## Table of Contents
 
-* [Features](#features)
+* [Overview](#overview)
+* [Understanding QR Codes](#understanding-qr-codes)
 * [Quick Start](#quick-start)
 * [Installation](#installation)
 * [Usage](#usage)
-* [Project Structure](#project-structure)
+* [CSV Features](#csv-features)
 * [Configuration](#configuration)
-* [Testing](#testing)
+* [Project Structure](#project-structure)
 * [Development](#development)
-* [Error Handling](#error-handling)
-* [Regression Testing](#regression-testing)
-* [Troubleshooting](#troubleshooting)
-* [License](#license)
+* [Testing](#testing)
 * [Contributing](#contributing)
+* [Support](#support)
+* [License](#license)
 
-## Features
+## Overview
+
+A Python CLI tool and library for generating QR codes from text data, URLs, or other information. This tool allows you to create customizable QR codes with various error correction levels, sizes, and colors.
+
+### Key Features
 
 - 🚀 **Generate QR codes** from text, URLs, or any string data
 - 📏 **Customizable versions** (1-40) for different sizes and capacities
@@ -37,6 +41,63 @@ A Python CLI tool for generating QR codes from text data, URLs, or other informa
 - 📊 **Comprehensive logging** and error handling
 - 🧪 **Full test coverage** with pytest
 - ⚡ **Fast processing** with PIL and qrcode libraries
+- 🔄 **CSV binary matrix conversion** for AI modeling and computer vision
+- 📦 **Batch processing** from CSV files
+
+### Key Features
+
+- 🚀 **Generate QR codes** from text, URLs, or any string data
+- 📏 **Customizable versions** (1-40) for different sizes and capacities
+- 🛡️ **Multiple error correction levels** (L, M, Q, H) for robustness
+- 🎨 **Custom colors** and styling options
+- 📷 **Multiple image formats** (PNG, JPEG, BMP) support
+- 🔍 **QR decoding** functionality for verification
+- 📊 **Comprehensive logging** and error handling
+- 🧪 **Full test coverage** with pytest
+- ⚡ **Fast processing** with PIL and qrcode libraries
+- 🔄 **CSV binary matrix conversion** for AI modeling and computer vision
+- 📦 **Batch processing** from CSV files
+
+## Understanding QR Codes
+
+QR codes have a sophisticated structure designed for reliable data encoding and decoding. Understanding this structure is essential for advanced applications like AI modeling and computer vision analysis.
+
+![QR Code Structure](docs/qr_structure_diagram.png)
+
+### Key Components
+
+| Component | Description | Purpose |
+|-----------|-------------|---------|
+| **Finder Patterns** | Three corner squares (top-left, top-right, bottom-left) | Help scanners locate and orient the QR code |
+| **Timing Patterns** | Alternating black/white modules between finder patterns | Provide reference for module size and position |
+| **Alignment Patterns** | Smaller squares positioned throughout the code | Help correct for distortion and improve reading accuracy |
+| **Format Information** | Data blocks near finder patterns | Specify error correction level and data mask pattern |
+| **Version Information** | Information blocks (for versions 7+) | Indicate the QR code version and capacity |
+| **Data Area** | The main content area | Contains the actual encoded data |
+| **Error Correction** | Reed-Solomon error correction codes | Allow recovery from damaged or partially obscured codes |
+| **Quiet Zone** | Blank space around the entire code | Ensures proper scanning by providing contrast |
+
+### Technical Specifications
+
+- **Module**: Smallest unit in a QR code (black or white square)
+- **Version**: Determines size (1-40, where version 1 is 21×21 modules)
+- **Error Correction Levels**:
+  - **L** (Low): ~7% recovery capacity
+  - **M** (Medium): ~15% recovery capacity
+  - **Q** (Quartile): ~25% recovery capacity
+  - **H** (High): ~30% recovery capacity
+
+### Data Encoding
+
+QR codes use sophisticated encoding schemes:
+- **Numeric**: 0-9 (most efficient, 3 digits per 10 bits)
+- **Alphanumeric**: Numbers, letters, and symbols (2 characters per 11 bits)
+- **Byte**: Raw 8-bit data (1 byte per 8 bits)
+- **Kanji**: Double-byte characters for Japanese text
+
+This structured approach allows QR codes to store data reliably even when partially damaged, making them ideal for real-world applications where perfect scanning conditions cannot be guaranteed.
+
+For more detailed technical information about QR codes, including encoding modes, error correction algorithms, and advanced features, see [`docs/QR.md`](docs/QR.md).
 
 ## Quick Start
 
@@ -321,51 +382,40 @@ QRCodeGenerator.csv_matrix_to_image(
 print("CSV matrix converted to QR code image")
 ```
 
-## CSV File Format
+## Usage
 
-### Input CSV Format
+### Command Line Interface
 
-The CSV input file should have the following columns (all optional except `data`):
+#### Basic Usage
+
+```bash
+python -m qr.main --csv-input qr_input.csv --csv-batch-output batch_output
+```
+
+### CSV Binary Matrix Conversion
+
+For AI modeling and computer vision applications, convert QR codes to/from binary matrix format:
+
+```bash
+# Convert QR image to CSV binary matrix
+python -m qr.main --image-to-csv qr_code.png --csv-output qr_matrix.csv
+
+# Convert CSV binary matrix to QR image
+python -m qr.main --csv-to-image qr_matrix.csv --output qr_from_matrix.png --box-size 5
+```
+
+### Input CSV Format for Batch Processing
 
 | Column | Type | Description | Default |
 |--------|------|-------------|---------|
 | `data` | string | **Required.** The data to encode | - |
 | `version` | int | QR version (1-39*) | 1 |
-|           |     | *Version 40 not supported by OpenCV decoder |   |
 | `error_correction` | string | Error correction level (L, M, Q, H) | M |
 | `box_size` | int | Box size in pixels | 10 |
 | `border` | int | Border width | 4 |
 | `fill_color` | string | Fill color | black |
 | `back_color` | string | Background color | white |
 | `image_format` | string | Image format (PNG, JPEG, BMP) | PNG |
-
-### Sample CSV File
-
-```csv
-data,version,error_correction,box_size,fill_color,back_color
-"Hello World",1,M,10,black,white
-"https://example.com",2,Q,15,blue,white
-"Special: !@#$%",3,H,20,red,yellow
-```
-
-### Output CSV Format
-
-When using `--csv-output`, the following metadata is saved:
-
-| Column | Description |
-|--------|-------------|
-| `data` | Encoded data |
-| `version` | QR version used |
-| `error_correction` | Error correction level |
-| `box_size` | Box size in pixels |
-| `border` | Border width |
-| `fill_color` | Fill color |
-| `back_color` | Background color |
-| `image_format` | Image format |
-| `image_path` | Path to generated image |
-| `file_size_bytes` | File size in bytes |
-| `created_timestamp` | File creation time |
-| `modified_timestamp` | File modification time |
 
 ### Binary Matrix CSV Format
 
@@ -380,8 +430,6 @@ When converting QR code images to CSV binary matrices, the tool generates a CSV 
 1,1,1,1,1,1,1,0,1,0,1,1,1,0,1,0,0,0,1,1,0
 1,0,0,0,0,0,1,0,0,1,0,0,0,1,0,1,1,0,0,0,0
 1,0,1,1,1,0,1,0,1,0,1,1,0,0,1,0,0,1,0,1,0
-1,0,1,1,1,0,1,0,0,1,0,1,1,0,0,0,1,0,1,0,0
-1,0,1,1,1,0,1,0,1,1,1,0,0,1,1,1,0,1,0,1,0
 ...
 ```
 
