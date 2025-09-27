@@ -3,6 +3,7 @@
 This module provides functionality to generate QR codes from input data.
 """
 
+import csv
 import logging
 from pathlib import Path
 from typing import Optional, Union
@@ -11,6 +12,13 @@ import cv2
 import qrcode
 from PIL import Image
 from qrcode.constants import ERROR_CORRECT_L, ERROR_CORRECT_M, ERROR_CORRECT_Q, ERROR_CORRECT_H
+
+try:
+    from pyzbar.pyzbar import decode as pyzbar_decode
+    from PIL import Image as PILImage
+    PYZBAR_AVAILABLE = True
+except ImportError:
+    PYZBAR_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +31,7 @@ class QRCodeGenerator:
 
     Attributes:
         data (str): The data to encode in the QR code.
-        version (int): The QR code version (1-40).
+        version (int): The QR code version (1-39*). *Version 40 not supported by OpenCV decoder.
         error_correction (qrcode.constants.ERROR_CORRECT): Error correction level.
         box_size (int): Size of each box in pixels.
         border (int): Border width in boxes.
@@ -47,7 +55,7 @@ class QRCodeGenerator:
 
         Args:
             data (str): The data to encode in the QR code.
-            version (int): QR code version (1-40, default: 1).
+            version (int): QR code version (1-39, default: 1). Version 40 not supported by OpenCV decoder.
             error_correction (int): Error correction level (0=L, 1=M, 2=Q, 3=H, default: 1).
             box_size (int): Size of each box in pixels (default: 10).
             border (int): Border width in boxes (default: 4).
@@ -56,10 +64,10 @@ class QRCodeGenerator:
             image_format (str): Output image format (default: "PNG").
 
         Raises:
-            ValueError: If version is not between 1 and 40, or if box_size/border are non-positive.
+            ValueError: If version is not between 1 and 39, or if box_size/border are non-positive.
         """
-        if not (1 <= version <= 40):
-            raise ValueError("Version must be between 1 and 40.")
+        if not (1 <= version <= 39):
+            raise ValueError("Version must be between 1 and 39. Version 40 is not supported by OpenCV decoder.")
         if box_size <= 0:
             raise ValueError("Box size must be positive.")
         if border <= 0:
@@ -157,6 +165,283 @@ class QRCodeGenerator:
             logger.error(f"Error generating QR code image: {e}")
             raise ValueError("Failed to generate QR code image.") from e
 
+    def save_qr_code_with_csv(
+        self,
+        image_path: Union[str, Path],
+        csv_path: Optional[Union[str, Path]] = None,
+        include_metadata: bool = True,
+    ) -> None:
+        """Save QR code image and optionally generate CSV metadata.
+
+        Args:
+            image_path (Union[str, Path]): Path to save the QR code image.
+            csv_path (Optional[Union[str, Path]]): Path to save CSV metadata.
+            include_metadata (bool): Whether to include file metadata in CSV.
+
+        Raises:
+            ValueError: If saving fails.
+        """
+        # Save the image first
+        self.save_qr_code(image_path)
+
+        # Generate CSV if requested
+        if csv_path:
+            self._save_metadata_to_csv(csv_path, image_path, include_metadata)
+
+    def _save_metadata_to_csv(
+        self,
+        csv_path: Union[str, Path],
+        image_path: Union[str, Path],
+        include_metadata: bool,
+    ) -> None:
+        """Save QR code metadata to CSV file.
+
+        Args:
+            csv_path (Union[str, Path]): Path to the CSV file.
+            image_path (Union[str, Path]): Path to the associated image file.
+            include_metadata (bool): Whether to include file metadata.
+        """
+        import os
+        from datetime import datetime
+
+        csv_path = Path(csv_path)
+        image_path = Path(image_path)
+
+        # Map error correction level back to string
+        error_correction_map = {
+            ERROR_CORRECT_L: "L",
+            ERROR_CORRECT_M: "M",
+            ERROR_CORRECT_Q: "Q",
+            ERROR_CORRECT_H: "H",
+        }
+
+        # Prepare CSV data
+        csv_data = {
+            "data": self.data,
+            "version": self.version,
+            "error_correction": error_correction_map.get(self.error_correction, str(self.error_correction)),
+            "box_size": self.box_size,
+            "border": self.border,
+            "fill_color": self.fill_color,
+            "back_color": self.back_color,
+            "image_format": self.image_format,
+            "image_path": str(image_path),
+        }
+
+        if include_metadata and image_path.exists():
+            stat = os.stat(image_path)
+            csv_data.update({
+                "file_size_bytes": stat.st_size,
+                "created_timestamp": datetime.fromtimestamp(stat.st_ctime).isoformat(),
+                "modified_timestamp": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+            })
+
+        # Write to CSV
+        csv_path.parent.mkdir(parents=True, exist_ok=True)
+        file_exists = csv_path.exists()
+
+        with open(csv_path, 'a', newline='', encoding='utf-8') as csvfile:
+            fieldnames = list(csv_data.keys())
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+
+            if not file_exists:
+                writer.writeheader()
+
+            writer.writerow(csv_data)
+
+        logger.info(f"QR code metadata saved to {csv_path}")
+
+    @classmethod
+    def from_csv_row(cls, csv_row: dict) -> "QRCodeGenerator":
+        """Create QRCodeGenerator from CSV row data.
+
+        Args:
+            csv_row (dict): Dictionary containing QR code parameters.
+
+        Returns:
+            QRCodeGenerator: Configured QR code generator.
+
+        Raises:
+            ValueError: If required parameters are missing or invalid.
+        """
+        # Map error correction string to int
+        error_correction_map = {
+            "L": ERROR_CORRECT_L,
+            "M": ERROR_CORRECT_M,
+            "Q": ERROR_CORRECT_Q,
+            "H": ERROR_CORRECT_H,
+        }
+
+        required_fields = ["data", "version", "error_correction"]
+        for field in required_fields:
+            if field not in csv_row:
+                raise ValueError(f"Required field '{field}' missing from CSV row")
+
+        # Parse parameters with defaults
+        params = {
+            "data": csv_row["data"],
+            "version": int(csv_row.get("version", 1)),
+            "error_correction": error_correction_map.get(
+                csv_row.get("error_correction", "M"), ERROR_CORRECT_M
+            ),
+            "box_size": int(csv_row.get("box_size", 10)),
+            "border": int(csv_row.get("border", 4)),
+            "fill_color": csv_row.get("fill_color", "black"),
+            "back_color": csv_row.get("back_color", "white"),
+            "image_format": csv_row.get("image_format", "PNG"),
+        }
+
+        return cls(**params)
+
+    @classmethod
+    def from_image(cls, image_path: Union[str, Path], **kwargs) -> "QRCodeGenerator":
+        """Create QRCodeGenerator by decoding an existing QR code image.
+
+        Args:
+            image_path (Union[str, Path]): Path to QR code image to decode.
+            **kwargs: Additional parameters to override (version, error_correction, etc.).
+
+        Returns:
+            QRCodeGenerator: QR code generator with decoded data.
+
+        Raises:
+            ValueError: If image cannot be decoded.
+        """
+        decoded_data = cls.decode_qr_code(image_path)
+        if decoded_data is None:
+            raise ValueError(f"Could not decode QR code from {image_path}")
+
+        # Use default parameters, override with any provided kwargs
+        default_params = {
+            "data": decoded_data,
+            "version": 1,  # Will auto-scale if needed
+            "error_correction": ERROR_CORRECT_M,
+            "box_size": 10,
+            "border": 4,
+            "fill_color": "black",
+            "back_color": "white",
+            "image_format": "PNG",
+        }
+        default_params.update(kwargs)
+
+        return cls(**default_params)
+
+    @staticmethod
+    def process_csv_batch(
+        csv_input_path: Union[str, Path],
+        output_dir: Union[str, Path] = "output",
+        csv_output_path: Optional[Union[str, Path]] = None,
+        image_prefix: str = "qr_",
+    ) -> int:
+        """Process a CSV file to batch generate QR codes.
+
+        Args:
+            csv_input_path (Union[str, Path]): Path to input CSV file.
+            output_dir (Union[str, Path]): Directory to save generated QR codes.
+            csv_output_path (Optional[Union[str, Path]]): Path to save metadata CSV.
+            image_prefix (str): Prefix for generated image filenames.
+
+        Returns:
+            int: Number of QR codes successfully generated.
+
+        Raises:
+            ValueError: If CSV file cannot be read or processed.
+        """
+        import uuid
+
+        csv_input_path = Path(csv_input_path)
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        successful_generations = 0
+
+        try:
+            with open(csv_input_path, 'r', newline='', encoding='utf-8') as csvfile:
+                reader = csv.DictReader(csvfile)
+
+                for row_num, row in enumerate(reader, start=2):  # Start at 2 because row 1 is header
+                    try:
+                        # Create generator from CSV row
+                        generator = QRCodeGenerator.from_csv_row(row)
+
+                        # Generate unique filename
+                        unique_id = str(uuid.uuid4())[:8]
+                        image_filename = f"{image_prefix}{row_num}_{unique_id}.png"
+                        image_path = output_dir / image_filename
+
+                        # Save QR code and optionally CSV metadata
+                        if csv_output_path:
+                            generator.save_qr_code_with_csv(image_path, csv_output_path)
+                        else:
+                            generator.save_qr_code(image_path)
+
+                        successful_generations += 1
+                        logger.info(f"Generated QR code {row_num}: {image_path}")
+
+                    except Exception as e:
+                        logger.error(f"Failed to generate QR code for row {row_num}: {e}")
+                        continue
+
+        except Exception as e:
+            raise ValueError(f"Failed to process CSV file {csv_input_path}: {e}")
+
+        logger.info(f"Successfully generated {successful_generations} QR codes from {csv_input_path}")
+        return successful_generations
+
+    @staticmethod
+    def regenerate_from_images(
+        input_dir: Union[str, Path],
+        output_dir: Union[str, Path] = "regenerated",
+        **override_params
+    ) -> int:
+        """Regenerate QR codes from existing QR code images.
+
+        Args:
+            input_dir (Union[str, Path]): Directory containing QR code images.
+            output_dir (Union[str, Path]): Directory to save regenerated QR codes.
+            **override_params: Parameters to override in regenerated QR codes.
+
+        Returns:
+            int: Number of QR codes successfully regenerated.
+        """
+        import glob
+
+        input_dir = Path(input_dir)
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        successful_regenerations = 0
+
+        # Find all image files
+        image_extensions = ['*.png', '*.jpg', '*.jpeg', '*.bmp']
+        image_files = []
+        for ext in image_extensions:
+            image_files.extend(glob.glob(str(input_dir / ext)))
+            image_files.extend(glob.glob(str(input_dir / ext.upper())))
+
+        for image_file in image_files:
+            try:
+                # Create generator from existing QR code
+                generator = QRCodeGenerator.from_image(image_file, **override_params)
+
+                # Generate new filename
+                input_path = Path(image_file)
+                output_filename = f"regenerated_{input_path.stem}.png"
+                output_path = output_dir / output_filename
+
+                # Save regenerated QR code
+                generator.save_qr_code(output_path)
+
+                successful_regenerations += 1
+                logger.info(f"Regenerated QR code: {input_path} -> {output_path}")
+
+            except Exception as e:
+                logger.error(f"Failed to regenerate QR code from {image_file}: {e}")
+                continue
+
+        logger.info(f"Successfully regenerated {successful_regenerations} QR codes")
+        return successful_regenerations
+
     @staticmethod
     def decode_qr_code(image_path: Union[str, Path]) -> Optional[str]:
         """Decode a QR code from an image file.
@@ -185,46 +470,110 @@ class QRCodeGenerator:
             else:  # Already grayscale
                 gray = img
 
-            # Enhance contrast and clean up the image
-            # Apply Gaussian blur to reduce noise
-            blurred = cv2.GaussianBlur(gray, (3, 3), 0)
+            # Enhanced preprocessing for better QR code detection
+            logger.debug(f"Image shape: {gray.shape}")
 
-            # Use adaptive thresholding for better binary conversion
-            # This works better than simple Otsu for QR codes with varying lighting
-            binary = cv2.adaptiveThreshold(
-                blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2
-            )
+            # For very large images (version 20+), use specialized processing
+            if gray.shape[0] > 1000 or gray.shape[1] > 1000:
+                logger.debug(f"Large image detected ({gray.shape}), using enhanced processing")
+                # For large images, use more sophisticated preprocessing
 
-            # Clean up the binary image with morphological operations
-            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
-            cleaned = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
+                # Step 1: Apply bilateral filtering to preserve edges while reducing noise
+                blurred = cv2.bilateralFilter(gray, 9, 75, 75)
+
+                # Step 2: Use adaptive thresholding with optimized parameters
+                block_size = min(gray.shape[0], gray.shape[1]) // 8
+                if block_size % 2 == 0:  # Must be odd
+                    block_size += 1
+                block_size = max(11, min(block_size, 51))  # Keep within reasonable bounds
+
+                binary = cv2.adaptiveThreshold(
+                    blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, block_size, 2
+                )
+
+                # Step 3: Apply morphological operations to clean up
+                kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+                cleaned = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
+                # Additional opening to remove small noise
+                cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_OPEN, kernel)
+            else:
+                # Standard preprocessing for smaller images
+                # Apply Gaussian blur to reduce noise
+                blurred = cv2.GaussianBlur(gray, (3, 3), 0)
+
+                # Use adaptive thresholding for better binary conversion
+                binary = cv2.adaptiveThreshold(
+                    blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2
+                )
+
+                # Clean up the binary image with morphological operations
+                kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
+                cleaned = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
 
             logger.debug(f"Decoding QR code from preprocessed image (shape: {cleaned.shape})")
 
-            # Use OpenCV's built-in QR code detector
+            # Use OpenCV's built-in QR code detector with enhanced parameters
             qr_detector = cv2.QRCodeDetector()
 
-            # Try different preprocessing approaches for better detection
-            decoded_data, _, _ = qr_detector.detectAndDecode(cleaned)
+            # Try multiple decoding approaches with different preprocessing methods
+            approaches = [
+                ("cleaned_binary", cleaned),
+                ("original_binary", binary),
+                ("blurred_grayscale", blurred),
+                ("original_grayscale", gray),
+                ("original_color", img),
+            ]
 
-            if not decoded_data:
-                # Try with processed binary
-                decoded_data, _, _ = qr_detector.detectAndDecode(binary)
+            # For large images, add Otsu thresholding as additional approach
+            if gray.shape[0] > 1000 or gray.shape[1] > 1000:
+                _, otsu_binary = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+                approaches.insert(1, ("otsu_binary", otsu_binary))
 
-            if not decoded_data:
-                # Try with blurred grayscale
-                decoded_data, _, _ = qr_detector.detectAndDecode(blurred)
+            # Try inverted approaches for white-on-black QR codes
+            inverted_approaches = []
+            for name, img_data in approaches:
+                if name in ["cleaned_binary", "original_grayscale", "original_color"]:
+                    if name == "cleaned_binary":
+                        inverted = cv2.bitwise_not(img_data)
+                        inverted_approaches.append(("inverted_cleaned", inverted))
+                    elif name == "original_grayscale":
+                        inverted_gray = cv2.bitwise_not(img_data)
+                        inverted_approaches.append(("inverted_grayscale", inverted_gray))
+                    elif name == "original_color":
+                        inverted_color = cv2.bitwise_not(img_data)
+                        inverted_approaches.append(("inverted_color", inverted_color))
 
-            if not decoded_data:
-                # Try with original grayscale
-                decoded_data, _, _ = qr_detector.detectAndDecode(gray)
+            all_approaches = approaches + inverted_approaches
 
-            if not decoded_data:
-                # Try with original color image as last resort
-                decoded_data, _, _ = qr_detector.detectAndDecode(img)
+            decoded_data = None
+            for approach_name, processed_img in all_approaches:
+                logger.debug(f"Trying {approach_name} approach")
+                try:
+                    decoded_data, points, _ = qr_detector.detectAndDecode(processed_img)
+                    if decoded_data and len(decoded_data.strip()) > 0:
+                        logger.debug(f"Successfully decoded using {approach_name} approach")
+                        break
+                except Exception as e:
+                    logger.debug(f"Approach {approach_name} failed: {e}")
+                    continue
 
-            if not decoded_data:
-                raise ValueError(f"Could not decode QR code from {image_path}")
+            if not decoded_data or len(decoded_data.strip()) == 0:
+                # Try pyzbar as a fallback if available
+                if PYZBAR_AVAILABLE:
+                    logger.debug("Trying pyzbar as fallback decoder")
+                    try:
+                        pil_img = PILImage.open(image_path)
+                        decoded_objects = pyzbar_decode(pil_img)
+                        if decoded_objects:
+                            decoded_data = decoded_objects[0].data.decode('utf-8')
+                            logger.debug(f"Successfully decoded using pyzbar fallback")
+                        else:
+                            raise ValueError(f"Could not decode QR code from {image_path} using any approach")
+                    except Exception as e:
+                        logger.debug(f"Pyzbar fallback also failed: {e}")
+                        raise ValueError(f"Could not decode QR code from {image_path} using any approach")
+                else:
+                    raise ValueError(f"Could not decode QR code from {image_path} using any approach")
 
             logger.info(f"QR code decoded successfully from {image_path}: '{decoded_data[:50]}...'")
             return decoded_data

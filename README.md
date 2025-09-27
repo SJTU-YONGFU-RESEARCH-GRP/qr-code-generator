@@ -6,7 +6,7 @@
 [![ruff](https://img.shields.io/badge/linter-ruff-red.svg)](https://github.com/astral-sh/ruff)
 [![CI/CD](https://img.shields.io/badge/CI/CD-GitHub%20Actions-orange.svg)](https://github.com/features/actions)
 [![Issues](https://img.shields.io/github/issues/SJTU-YONGFU-RESEARCH-GRP/qr-code-generator)](https://github.com/SJTU-YONGFU-RESEARCH-GRP/qr-code-generator/issues)
-[![GitHub Stars](https://img.shields.io/github/stars/SJTU-YONGFU-RESEARCH-GRP/qr-code-generator?style=flat-square&logo=github&color=ffdd00&label=⭐%20Stars&v=1)](https://github.com/SJTU-YONGFU-RESEARCH-GRP/qr-code-generator/stargazers)
+[![GitHub Stars](https://img.shields.io/github/stars/SJTU-YONGFU-RESEARCH-GRP/qr-code-generator?style=flat-square&logo=github&color=ffdd00&label=⭐%20Stars)](https://github.com/SJTU-YONGFU-RESEARCH-GRP/qr-code-generator/stargazers)
 
 A Python CLI tool for generating QR codes from text data, URLs, or other information. This tool allows you to create customizable QR codes with various error correction levels, sizes, and colors.
 
@@ -131,6 +131,12 @@ python -m qr.main [OPTIONS] DATA
 | `-k, --back-color` | `-k` | Background color | white |
 | `-i, --image-format` | `-i` | Output image format (PNG, JPEG, BMP) | PNG |
 | `--log-level` | - | Logging level (DEBUG, INFO, WARNING, ERROR) | INFO |
+| `--csv-output` | - | Path to save CSV metadata file | - |
+| `--csv-input` | - | Path to CSV file for batch generation | - |
+| `--csv-batch-output` | - | Output directory for batch CSV processing | - |
+| `--from-image` | - | Path to QR image to decode and regenerate | - |
+| `--regenerate-dir` | - | Directory of QR images to regenerate | - |
+| `--regenerate-output` | - | Output directory for regenerated QR codes | regenerated |
 
 #### Examples
 
@@ -152,6 +158,26 @@ python -m qr.main [OPTIONS] DATA
 4. **JPEG format:**
    ```bash
    python -m qr.main "Image data" -f JPEG --fill-color red -o image.jpg
+   ```
+
+5. **Generate with CSV metadata:**
+   ```bash
+   python -m qr.main "Sample data" -o qr.png --csv-output metadata.csv
+   ```
+
+6. **Batch generate from CSV:**
+   ```bash
+   python -m qr.main --csv-input qr_input.csv --csv-batch-output batch_output
+   ```
+
+7. **Regenerate from existing QR code:**
+   ```bash
+   python -m qr.main --from-image existing_qr.png -o new_qr.png --fill-color blue
+   ```
+
+8. **Batch regenerate from directory:**
+   ```bash
+   python -m qr.main --regenerate-dir qr_images --regenerate-output regenerated --box-size 20
    ```
 
 ### Using as a Library
@@ -194,7 +220,37 @@ img.show()
 generator.save_qr_code("custom_qr.jpg", format="JPEG")
 ```
 
-#### Decoding QR Codes
+#### CSV Output with Metadata
+
+```python
+from qr.core.qr_generator import QRCodeGenerator
+
+generator = QRCodeGenerator(data="Sample data", version=5)
+
+# Save QR code with CSV metadata
+generator.save_qr_code_with_csv(
+    image_path="qr_code.png",
+    csv_path="metadata.csv",
+    include_metadata=True
+)
+# Creates both qr_code.png and metadata.csv with file info
+```
+
+#### Batch Processing from CSV
+
+```python
+from qr.core.qr_generator import QRCodeGenerator
+
+# Process multiple QR codes from CSV file
+successful = QRCodeGenerator.process_csv_batch(
+    csv_input_path="qr_input.csv",
+    output_dir="batch_output",
+    csv_output_path="batch_metadata.csv"  # Optional
+)
+print(f"Generated {successful} QR codes")
+```
+
+#### Decoding and Regenerating QR Codes
 
 ```python
 from qr.core.qr_generator import QRCodeGenerator
@@ -203,12 +259,74 @@ from qr.core.qr_generator import QRCodeGenerator
 decoded_data = QRCodeGenerator.decode_qr_code("path/to/qr_code.png")
 print(f"Decoded: {decoded_data}")
 
-# Decode from PIL Image
-from PIL import Image
-img = Image.open("qr_code.png")
-decoded_data = QRCodeGenerator.decode_qr_code(img)
-print(f"Decoded: {decoded_data}")
+# Regenerate from existing QR code with new parameters
+generator = QRCodeGenerator.from_image(
+    "existing_qr.png",
+    version=10,  # Override parameters
+    box_size=20,
+    fill_color="blue"
+)
+generator.save_qr_code("regenerated_qr.png")
 ```
+
+#### Batch Regeneration from Directory
+
+```python
+# Regenerate all QR codes in a directory
+successful = QRCodeGenerator.regenerate_from_images(
+    input_dir="qr_images",
+    output_dir="regenerated",
+    fill_color="red",  # Apply to all
+    box_size=15
+)
+print(f"Regenerated {successful} QR codes")
+```
+
+## CSV File Format
+
+### Input CSV Format
+
+The CSV input file should have the following columns (all optional except `data`):
+
+| Column | Type | Description | Default |
+|--------|------|-------------|---------|
+| `data` | string | **Required.** The data to encode | - |
+| `version` | int | QR version (1-39*) | 1 |
+|           |     | *Version 40 not supported by OpenCV decoder |   |
+| `error_correction` | string | Error correction level (L, M, Q, H) | M |
+| `box_size` | int | Box size in pixels | 10 |
+| `border` | int | Border width | 4 |
+| `fill_color` | string | Fill color | black |
+| `back_color` | string | Background color | white |
+| `image_format` | string | Image format (PNG, JPEG, BMP) | PNG |
+
+### Sample CSV File
+
+```csv
+data,version,error_correction,box_size,fill_color,back_color
+"Hello World",1,M,10,black,white
+"https://example.com",2,Q,15,blue,white
+"Special: !@#$%",3,H,20,red,yellow
+```
+
+### Output CSV Format
+
+When using `--csv-output`, the following metadata is saved:
+
+| Column | Description |
+|--------|-------------|
+| `data` | Encoded data |
+| `version` | QR version used |
+| `error_correction` | Error correction level |
+| `box_size` | Box size in pixels |
+| `border` | Border width |
+| `fill_color` | Fill color |
+| `back_color` | Background color |
+| `image_format` | Image format |
+| `image_path` | Path to generated image |
+| `file_size_bytes` | File size in bytes |
+| `created_timestamp` | File creation time |
+| `modified_timestamp` | File modification time |
 
 ## Project Structure
 

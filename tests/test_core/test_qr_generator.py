@@ -123,3 +123,40 @@ class TestQRCodeGenerator:
         generator = QRCodeGenerator(data="test")
         with pytest.raises(ValueError, match="Failed to generate QR code"):
             generator.generate_qr_code()
+
+    def test_decode_qr_code_basic(self) -> None:
+        """Test QR code decoding with a simple QR code."""
+        # Generate a simple QR code
+        generator = QRCodeGenerator(data="Test decode")
+        qr = generator.generate_qr_code()
+
+        # Save to a temporary file
+        with tempfile.TemporaryDirectory() as temp_dir:
+            test_file = Path(temp_dir) / "test_qr.png"
+            img = qr.make_image(fill_color="black", back_color="white")
+            img.save(test_file)
+
+            # Test decoding
+            decoded = QRCodeGenerator.decode_qr_code(test_file)
+            assert decoded == "Test decode"
+
+    def test_decode_qr_code_large_version(self) -> None:
+        """Test QR code decoding with a large version (version 20)."""
+        # Generate a version 20 QR code (should create a large image)
+        generator = QRCodeGenerator(
+            data="A" * 400,  # Large data to force version 20
+            version=20,
+            error_correction=3,  # ERROR_CORRECT_H
+            box_size=10,
+        )
+        qr = generator.generate_qr_code()
+
+        # Save to a temporary file
+        with tempfile.TemporaryDirectory() as temp_dir:
+            test_file = Path(temp_dir) / "test_large_qr.png"
+            img = qr.make_image(fill_color="black", back_color="white")
+            img.save(test_file)
+
+            # Test decoding - this should work with our improved preprocessing
+            decoded = QRCodeGenerator.decode_qr_code(test_file)
+            assert decoded == "A" * 400
